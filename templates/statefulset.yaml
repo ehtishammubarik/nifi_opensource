@@ -1,219 +1,313 @@
-{{ $nifi_root := printf "%s%s" "/opt/nifi-registry/nifi-registry-" .Values.image.tag }}
 apiVersion: apps/v1
-kind: Statefulset
+kind: StatefulSet
 metadata:
-  name: {{ template "nifireg.fullname" . }}
-  namespace: {{ .Release.Namespace }}
-  annotations:
-    date: {{ now | htmlDate }}
+  name: {{ template "apache-nifi.fullname" . }}
   labels:
-    app: {{ template "nifireg.fullname" . }}
-    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    release: {{ .Release.Name }}
-    heritage: {{ .Release.Service }}
-    date: {{ now | htmlDate }}
+    app: {{ include "apache-nifi.name" . | quote }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+    release: {{ .Release.Name | quote }}
+    heritage: {{ .Release.Service | quote }}
 spec:
   podManagementPolicy: {{ .Values.sts.podManagementPolicy }}
-  serviceName: {{ template "nifireg.fullname" . }}-headless
-  replicas: 1
+  serviceName: {{ template "apache-nifi.fullname" . }}-headless
+  replicas: {{ .Values.replicaCount }}
   selector:
     matchLabels:
-      app: {{ template "nifireg.fullname" . }}
+      app: {{ template "apache-nifi.name" . }}
       release: {{ .Release.Name }}
   template:
     metadata:
-      labels:
-        app: {{ template "nifireg.fullname" . }}
-        release: {{ .Release.Name }}
       annotations:
-        releaseTime: {{ dateInZone "2006-01-02 15:04:05Z" (now) "UTC"| quote }}
+        security.alpha.kubernetes.io/sysctls: net.ipv4.ip_local_port_range=10000 65000
+      labels:
+        app: {{ include "apache-nifi.name" . | quote }}
+        chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+        release: {{ .Release.Name | quote }}
+        heritage: {{ .Release.Service | quote }}
     spec:
-      dnsPolicy: {{ .Values.dnsPolicy |default "ClusterFirst" }}
-      volumes:
-{{- if .Values.extraVolumes }}
-{{ toYaml .Values.extraVolumes | indent 8 }}
+      {{- if eq .Values.sts.AntiAffinity "hard"}}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: "app"
+                    operator: In
+                    values:
+                    - {{ include "apache-nifi.name" . | quote }}
+              topologyKey: "kubernetes.io/hostname"
+      {{- else if eq .Values.sts.AntiAffinity "soft"}}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+             - weight: 1
+               podAffinityTerm:
+                 labelSelector:
+                    matchExpressions:
+                      - key: "component"
+                        operator: In
+                        values:
+                         - {{ include "apache-nifi.name" . | quote }}
+                 topologyKey: "kubernetes.io/hostname"
+      {{- end}}
+{{- if .Values.securityContext }}
+      securityContext:
+{{ toYaml .Values.securityContext | indent 8 }}
 {{- end }}
+      {{- if .Values.image.pullSecret }}
       imagePullSecrets:
         - name: {{ .Values.image.pullSecret }}
-{{- if .Values.nodeSelector }}
-      nodeSelector:
-{{ toYaml .Values.nodeSelector | indent 8 }}
-{{- end }}
+      {{- end }}
       containers:
-        - name: registry
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: Always
-          env:
-            - name: NIFIREG_GIT_REPO_PROTO
-              value: "https://"
-            - name: NIFIREG_GIT_REPO_URI
-              value: {{ .Values.config.git.address }}
-            - name: NIFIREG_GIT_REPO
-              value: {{ .Values.config.git.repo }}
-            - name: NIFI_REGISTRY_GIT_USER
-              valueFrom:
-                secretKeyRef:
-                  name: nifiregistrypass
-                  key: username
-            - name: NIFI_REGISTRY_GIT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: nifiregistrypass
-                  key: password
-            - name: KEY_STORE_PASSWD
-              valueFrom:
-                secretKeyRef:
-                  name: nifi-registry-certs-passwd
-                  key: KEY_STORE_PASSWD
-            - name: KEY_PASSWD
-              valueFrom:
-                secretKeyRef:
-                  name: nifi-registry-certs-passwd
-                  key: KEY_PASSWD
-            - name: TRUST_STORE_PASSWD
-              valueFrom:
-                secretKeyRef:
-                  name: nifi-registry-certs-passwd
-                  key: TRUST_STORE_PASSWD
-          command:
-            - /bin/bash
-            - -c
-            - |
+      - name: server
+        imagePullPolicy: {{ .Values.image.pullPolicy | quote }}
+        image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag}}"
+        command:
+        - bash
+        - -ce
+        - |
+          prop_replace () {
+            target_file=${NIFI_HOME}/conf/nifi.properties
+            echo 'replacing target file ' ${target_file}
+            sed -i -e "s|^$1=.*$|$1=$2|"  ${target_file}
+          }
 
-              set -x
-              set -e
-              NIFI_REGISTRY_HOME=/opt/nifi-registry/nifi-registry-current
+          FQDN=$(hostname -f)
+          HOST=$(hostname)
 
-              echo 'Create directory for Apache Ranger policy cache...'
-              touch /etc/ranger/nifi-registry/policycache/nifi-registry.json
+          cat "${NIFI_HOME}/conf/nifi.temp" > "${NIFI_HOME}/conf/nifi.properties"
+          cat "${NIFI_HOME}/conf/authorizers.temp" > "${NIFI_HOME}/conf/authorizers.xml"
 
-              echo '...0'
-              cd ${NIFI_REGISTRY_HOME}
-              echo 'done...0'
+          if [ $HOST == ${HOST_INFO}"-0" ];then
+              echo "This is the nifi-0"
+              cp /tmp/cert/nifi-0/*.jks /opt/nifi/nifi-current/conf/
+              keyPassword=$(cat /tmp/cert/nifi-0/config.json  | grep keyPassword | awk -F '"' '{print $4}')
+              trustPassword=$(cat /tmp/cert/nifi-0/config.json  | grep trustStorePassword | awk -F '"' '{print $4}')
+              prop_replace nifi.security.keystorePasswd ${keyPassword}
+              prop_replace nifi.security.keyPasswd ${keyPassword}
+              prop_replace nifi.security.truststorePasswd ${trustPassword}
+              prop_replace nifi.web.https.host ${HOST}
+              prop_replace nifi.cluster.node.address ${FQDN}
+              prop_replace nifi.web.https.host ${FQDN}
+   
+              echo "Begin to create kafka pid file"
+              mkdir -p /opt/nifi/data/zookeeper/ && echo "0">/opt/nifi/data/zookeeper/myid
+          elif [ $HOST == ${HOST_INFO}"-1" ];then
+              echo "This is the nifi-1"
+              cp /tmp/cert/nifi-1/*.jks /opt/nifi/nifi-current/conf/
+              keyPassword=$(cat /tmp/cert/nifi-1/config.json  | grep keyPassword | awk -F '"' '{print $4}')
+              trustPassword=$(cat /tmp/cert/nifi-1/config.json  | grep trustStorePassword | awk -F '"' '{print $4}')
+              prop_replace nifi.security.keystorePasswd ${keyPassword}
+              prop_replace nifi.security.keyPasswd ${keyPassword}
+              prop_replace nifi.security.truststorePasswd ${trustPassword}
+              prop_replace nifi.web.https.host ${HOST}
+              prop_replace nifi.cluster.node.address ${FQDN}
+              prop_replace nifi.web.https.host ${FQDN}
+              mkdir -p /opt/nifi/data/zookeeper/ && echo "1">/opt/nifi/data/zookeeper/myid
+          elif [ $HOST == ${HOST_INFO}"-2" ];then
+              echo "This is the nifi-2" 
+              cp /tmp/cert/nifi-2/*.jks /opt/nifi/nifi-current/conf/
+              keyPassword=$(cat /tmp/cert/nifi-2/config.json  | grep keyPassword | awk -F '"' '{print $4}')
+              trustPassword=$(cat /tmp/cert/nifi-2/config.json  | grep trustStorePassword | awk -F '"' '{print $4}')
+              prop_replace nifi.security.keystorePasswd ${keyPassword}
+              prop_replace nifi.security.keyPasswd ${keyPassword}
+              prop_replace nifi.security.truststorePasswd ${trustPassword}
+              prop_replace nifi.web.https.host ${HOST}
+              prop_replace nifi.cluster.node.address ${FQDN}
+              prop_replace nifi.web.https.host ${FQDN}
+              mkdir -p /opt/nifi/data/zookeeper/ && echo "2">/opt/nifi/data/zookeeper/myid
+          else
+              echo "Please check the hostname info or replicount"
+              exit 1
+          fi
 
-              echo '...1'
-              cd ./git_storage
+          prop_replace nifi.zookeeper.connect.string ${NIFI_ZOOKEEPER_CONNECT_STRING}
 
-              git config --global http.sslverify "false"
-
-              if [[ -d "${NIFIREG_GIT_REPO}" ]]; then
-                echo 'There is cloned Git repo(s)'
-                cd ${NIFIREG_GIT_REPO}
-                git pull
-              else
-                echo 'Cloning the Git repository...'
-                git clone "https://${NIFI_REGISTRY_GIT_USER}:${NIFI_REGISTRY_GIT_PASSWORD}@${NIFIREG_GIT_REPO_URI}/${NIFIREG_GIT_REPO}.git"
-              fi
-
-              ls -la
-              echo 'done...1'
-
-              prop_replace () {
-                target_file=${NIFI_REGISTRY_HOME}/conf/nifi-registry.properties
-                echo "updating ${1} in ${target_file}"
-                if egrep "^${1}=" ${target_file} &> /dev/null; then
-                sed -i -e "s|^$1=.*$|$1=$2|"  ${target_file}
-                else
-                echo ${1}=${2} >> ${target_file}
-                fi
-              }         
-
-              FQDN=$(hostname -f)
-              cd ${NIFI_REGISTRY_HOME}
-
-              NIFI_PROPS=${NIFI_REGISTRY_HOME}/conf/nifi-registry.properties
-              NIFI_AUTHZ_FILE=${NIFI_REGISTRY_HOME}/conf/authorizers.xml
-              NIFI_LOGIN_ID=${NIFI_REGISTRY_HOME}/conf/identity-providers.xml
-              NIFI_KEY_STORE=${NIFI_REGISTRY_HOME}/conf/keystore.jks
-              NIFI_KEY_STORE_TYPE=jks
-              NIFI_KEY_STORE_PASSWORD=$KEY_STORE_PASSWD
-              NIFI_KEY_PASSWORD=$KEY_PASSWD
-              NIFI_TRUST_STORE=${NIFI_REGISTRY_HOME}/conf/truststore.jks
-              NIFI_TRUST_STORE_TYPE=jks
-              NIFI_TRUST_STORE_PASSWORD=$TRUST_STORE_PASSWD
-              NIFI_INITIAL_ADMIN_IDENTITY=albert.lewandowski
-
-              # Fix permissions
-              cp ${NIFI_REGISTRY_HOME}/keystore.jks ${NIFI_REGISTRY_HOME}/conf/keystore.jks
-              cp ${NIFI_REGISTRY_HOME}/truststore.jks ${NIFI_REGISTRY_HOME}/conf/truststore.jks
-
-              cp ${NIFI_LOGIN_ID} ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml
-              sed -i -e 's|<property name="TLS - Keystore Password"></property>|<property name="TLS - Keystore Password">'"${NIFI_KEY_STORE_PASSWORD}"'</property>|'                       ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml
-              sed -i -e 's|<property name="TLS - Truststore Password"></property>|<property name="TLS - Truststore Password">'"${NIFI_TRUST_STORE_PASSWORD}"'</property>|'                 ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml                                                                                                                      ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml
-
-              sed -i -e 's|<property name="Remote Access User"></property>|<property name="Remote Access User">'"${NIFI_REGISTRY_GIT_USER}"'</property>|'                 ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml
-              sed -i -e 's|<property name="Remote Access User"></property>|<property name="Remote Access Password">'"${NIFI_REGISTRY_GIT_PASSWORD}"'</property>|'                 ${NIFI_REGISTRY_HOME}/conf/new-identity-providers.xml
-
-              cat "${NIFI_REGISTRY_HOME}/conf/nifi-registry.temp" > "${NIFI_REGISTRY_HOME}/conf/nifi-registry.properties"
-              cat "${NIFI_REGISTRY_HOME}/conf/authorizers.temp" > "${NIFI_REGISTRY_HOME}/conf/authorizers.xml"
-
-              {{- if .Values.config.security.https.enabled }}
-              prop_replace nifi.registry.security.keystore                 ${NIFI_KEY_STORE}
-              prop_replace nifi.registry.security.keystoreType             ${NIFI_KEY_STORE_TYPE}
-              prop_replace nifi.registry.security.keystorePasswd           ${NIFI_KEY_STORE_PASSWORD}
-              prop_replace nifi.registry.security.keyPasswd                ${NIFI_KEY_PASSWORD}
-              prop_replace nifi.registry.security.truststore               ${NIFI_TRUST_STORE}
-              prop_replace nifi.registry.security.truststoreType           ${NIFI_TRUST_STORE_TYPE}
-              prop_replace nifi.registry.security.truststorePasswd         ${NIFI_TRUST_STORE_PASSWORD}
-
-              # Set up TLS
-              sed -i -e 's|<property name="TLS - Keystore Password"></property>|<property name="TLS - Keystore Password">'"${NIFI_KEY_STORE_PASSWORD}"'</property>|' ${NIFI_AUTHZ_FILE}
-              sed -i -e 's|<property name="TLS - Truststore Password"></property>|<property name="TLS - Truststore Password">'"${NIFI_TRUST_STORE_PASSWORD}"'</property>|' ${NIFI_AUTHZ_FILE}
-              {{- end }}
-
-              ${NIFI_REGISTRY_HOME}/bin/nifi-registry.sh start
-              tail -F "${NIFI_REGISTRY_HOME}/logs/nifi-registry-app.log" &
-              nifi_registry_pid="$!"
-
-              trap "echo Received trapped signal, beginning shutdown...;" KILL TERM HUP INT EXIT;
-
-              echo NiFi-Registry running with PID ${nifi_registry_pid}.
-              wait ${nifi_registry_pid}
-          resources:
-{{ toYaml .Values.resources | indent 12 }}
-          ports:
-            {{- if .Values.config.security.https.enabled }}
-            - name: {{ .Values.portName | default "https" }}
-              containerPort: {{ .Values.config.ports.https }}
-              protocol: TCP
-            {{- else }}
-            - name: {{ .Values.portName | default "http" }}
-              containerPort: {{ .Values.config.ports.http }}
-              protocol: TCP
-            {{- end }}
-          volumeMounts:
-            - name: nifi-registry-authorizers
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/authorizers.temp
-              subPath: authorizers.xml
-            - name: nifi-registry-bootstrap
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/bootstrap.conf
-              subPath: bootstrap.conf
-            - name: nifi-registry-identity
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/identity-providers.xml
-              subPath: identity-providers.xml
-            - name: krb5-conf
-              mountPath: /etc/krb5.conf
-              subPath: krb5.conf
-            - name: nifi-registry-logback
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/logback.xml
-              subPath: logback.xml
-            - name: nifi-registry-properties
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/nifi-registry.temp
-              subPath: nifi-registry.properties
-            - name: nifi-registry-providers
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/providers.xml
-              subPath: providers.xml
-  {{- if .Values.auth.ranger.enabled }}
-            - name: ranger-security
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/ranger-nifi-registry-security.xml
-              subPath: ranger-nifi-registry-security.xml
-            - name: ranger-audit
-              mountPath: /opt/nifi-registry/nifi-registry-current/conf/ranger-nifi-registry-audit.xml
-              subPath: ranger-nifi-registry-audit.xml
-  {{- end }}
-            - name: truststore
-              mountPath: /opt/nifi-registry/nifi-registry-current/truststore.jks
-              subPath: truststore.jks
-            - name: keystore
-              mountPath: /opt/nifi-registry/nifi-registry-current/keystore.jks
-              subPath: keystore.jks
+          exec bin/nifi.sh run
+        resources:
+{{ toYaml .Values.resources | indent 10 }}
+        ports:
+{{- if .Values.properties.httpsPort }}
+        - containerPort: {{ .Values.properties.httpsPort }}
+{{- if .Values.sts.hostPort }}
+          hostPort: {{ .Values.sts.hostPort }}
+{{- end }}
+          name: https
+          protocol: TCP
+{{- end }}
+{{- if .Values.properties.httpPort }}
+        - containerPort: {{ .Values.properties.httpPort }}
+          name: http
+          protocol: TCP
+{{- end }}
+        - containerPort: {{ .Values.properties.clusterPort }}
+          name: cluster
+          protocol: TCP
+        - containerPort: {{ .Values.properties.cachePort }}
+          name: cache
+          protocol: TCP
+        env:
+        - name: NIFI_ZOOKEEPER_CONNECT_STRING
+          value: {{ template "embed.zookeeper" . }}
+        - name: HOST_INFO
+          value: {{ .Release.Name }}
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - bash
+              - -c
+              - |
+                $NIFI_HOME/bin/nifi.sh stop
+{{- if .Values.postStart }}
+          postStart:
+            exec:
+              command: ["/bin/sh", "-c", {{ .Values.postStart | quote }}]
+{{- end }}
+        volumeMounts:
+          - name: "nifi-data"
+            mountPath: /opt/nifi/data
+            subPath: data
+          - name: "nifi-data"
+            mountPath: /opt/nifi/flowfile_repository
+            subPath: flowfile_repository
+          - name: "nifi-data"
+            mountPath: /opt/nifi/content_repository
+            subPath: content_repository
+          - name: "nifi-data"
+            mountPath: /opt/nifi/provenance_repository
+            subPath: provenance_repository
+          - name: "nifi-logs"
+            mountPath: /opt/nifi/nifi-current/logs
+            subPath: logs
+          - name: "bootstrap-conf"
+            mountPath: /opt/nifi/nifi-current/conf/bootstrap.conf
+            subPath: "bootstrap.conf"
+          - name: "nifi-properties"
+            mountPath: /opt/nifi/nifi-current/conf/nifi.temp
+            subPath: "nifi.temp"
+          - name: "authorizers-temp"
+            mountPath: /opt/nifi/nifi-current/conf/authorizers.temp
+            subPath: "authorizers.temp"
+          - name: "authorizers-empty"
+            mountPath: /opt/nifi/nifi-current/conf/authorizers.empty
+            subPath: "authorizers.empty"
+          - name: "bootstrap-notification-services-xml"
+            mountPath: /opt/nifi/nifi-current/conf/bootstrap-notification-services.xml
+            subPath: "bootstrap-notification-services.xml"
+          - name: "logback-xml"
+            mountPath: /opt/nifi/nifi-current/conf/logback.xml
+            subPath: "logback.xml"
+          - name: "login-identity-providers-xml"
+            mountPath: /opt/nifi/nifi-current/conf/login-identity-providers.xml
+            subPath: "login-identity-providers.xml"
+          - name: "state-management-xml"
+            mountPath: /opt/nifi/nifi-current/conf/state-management.xml
+            subPath: "state-management.xml"
+          - name: "zookeeper-properties"
+            mountPath: /opt/nifi/nifi-current/conf/zookeeper.properties
+            subPath: "zookeeper.properties"
+      - name: app-log
+        image: {{ .Values.sidecar.image }}
+        args: [tail, -n+1, -F, /var/log/logs/nifi-app.log]
+        resources:
+{{ toYaml .Values.logresources | indent 10 }}
+        volumeMounts:
+        - name: "nifi-logs"
+          mountPath: /var/log
+      - name: bootstrap-log
+        image: {{ .Values.sidecar.image }}
+        args: [tail, -n+1, -F, /var/log/logs/nifi-bootstrap.log]
+        resources:
+{{ toYaml .Values.logresources | indent 10 }}
+        volumeMounts:
+        - name: "nifi-logs"
+          mountPath: /var/log
+      - name: user-log
+        image: {{ .Values.sidecar.image }}
+        args: [tail, -n+1, -F, /var/log/logs/nifi-user.log]
+        resources:
+{{ toYaml .Values.logresources | indent 10 }}
+        volumeMounts:
+        - name: "nifi-logs"
+          mountPath: /var/log
+      volumes:
+      - name: "bootstrap-conf"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "bootstrap.conf"
+              path: "bootstrap.conf"
+      - name: "nifi-properties"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "nifi.properties"
+              path: "nifi.temp"
+      - name: "authorizers-temp"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "authorizers.xml"
+              path: "authorizers.temp"
+      - name: "authorizers-empty"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "authorizers-empty.xml"
+              path: "authorizers.empty"
+      - name: "bootstrap-notification-services-xml"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "bootstrap-notification-services.xml"
+              path: "bootstrap-notification-services.xml"
+      - name: "logback-xml"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "logback.xml"
+              path: "logback.xml"
+      - name: "login-identity-providers-xml"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "login-identity-providers.xml"
+              path: "login-identity-providers.xml"
+      - name: "state-management-xml"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "state-management.xml"
+              path: "state-management.xml"
+      - name: "zookeeper-properties"
+        configMap:
+          name: {{ template "apache-nifi.fullname" . }}-config
+          items:
+            - key: "zookeeper.properties"
+              path: "zookeeper.properties"
+{{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: nifi-data
+      spec:
+        accessModes:
+        {{- range .Values.persistence.accessModes }}
+          - {{ . | quote }}
+        {{- end }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.dataStorage.size }}
+    - metadata:
+        name: nifi-logs
+      spec:
+        accessModes:
+        {{- range .Values.persistence.accessModes }}
+          - {{ . | quote }}
+        {{- end }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.logStorage.size }}
+{{- end }}

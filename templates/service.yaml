@@ -2,31 +2,50 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: nifi-registry-service
+    name: {{ template "apache-nifi.fullname" . }}-headless
+    labels:
+        app: {{ include "apache-nifi.name" . | quote }}
+        chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+        release: {{ .Release.Name | quote }}
+        heritage: {{ .Release.Service | quote }}
+    annotations:
+        service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
+spec:
+    type: {{ .Values.service.headless.type }}
+    clusterIP: None
+    ports:
+{{- if .Values.properties.clusterSecure }}
+    - port: {{ .Values.properties.httpsPort }}
+      name: https
+{{- else}}
+    - port: {{ .Values.properties.httpPort }}
+      name: http
+{{- end }}
+    - port: {{ .Values.properties.clusterPort }}
+      name: cluster
+    - port: {{ .Values.properties.cachePort }}
+      name: cache
+    - port: {{ .Values.properties.jobPort }}
+      name: job
+    selector:
+        app: {{ include "apache-nifi.name" . | quote }}
+        release: {{ .Release.Name | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ template "apache-nifi.fullname" . }}
   labels:
-    app: {{ include "nifireg.fullname" . | quote }}
-    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app: {{ include "apache-nifi.name" . | quote }}
+    chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
     release: {{ .Release.Name | quote }}
     heritage: {{ .Release.Service | quote }}
-{{- if .Values.headless.annotations }}
-  annotations:
-{{ toYaml .Values.headless.annotations | indent 4 }}
-{{- end }}
 spec:
-  selector:
-    app: {{ template "nifireg.fullname" . }}
-    release: {{ .Release.Name }}
-  type: {{ .Values.headless.type }}
-  # It can be useful for setting up IP if we already have created Load Balancer
-  # loadBalancerIP: {{ .Values.headless.ip }}
+  type: {{ .Values.service.clusterip.type }}
   ports:
-  {{- if .Values.config.security.https.enabled }}
-    - name: {{ .Values.portName | default "https" }}
-      protocol: TCP
-      targetPort: {{ .Values.config.ports.https }}
-  {{- else }}
-    - name: {{ .Values.portName | default "http" }}
-      protocol: TCP
-      port: {{ .Values.config.ports.http }}
-      targetPort: {{ .Values.portNumber | default "18080" }}
-  {{- end }}
+    - port: {{ .Values.service.clusterip.port}}
+      name: https
+      targetPort: {{ .Values.properties.httpsPort }}
+  selector:
+    app: {{ template "apache-nifi.name" . }}
+    release: {{ .Release.Name }}

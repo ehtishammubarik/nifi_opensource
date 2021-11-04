@@ -1,176 +1,122 @@
 ---
-
-# Number of nifi registry nodes
-replicaCount: 1
+replicaCount: 3
 
 image:
-  repository: apache/nifi-registry
-  tag: "0.8.0"
-  pullPolicy: Always
-  pullSecret: regcred
-
-securityContext:
-  fsGroup: 1000
-  runAsUser: 1000
-  runAsGroup: 1000
-
-# headless service
-headless:
-  type: LoadBalancer
-  # It can be useful for setting up IP if we already have created Load Balancer
-  # ip: 127.0.0.1
-  annotations:
-    service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
-
-sts:
-  podManagementPolicy: Parallel
-
-resources:
-  requests:
-    cpu: 2000m
-    memory: 4096Mi
-  limits:
-    cpu: 2000m
-    memory: 4096Mi
-
-jvm:
-  xmx: "1024m"
-  xms: "1024m"
-
-kerberos:
-  enabled: true
-
-config:
-  security:
-    https:
-      enabled: true
-    certificateName: nifi-registry-ca-cs
-  ports:
-    http: 18080
-    https: 18443
-  db:
-    class: "org.postgresql.Driver"
-    username: nifiregistry
-    password: dbpasswordtoreplace
-    host: pgpool-getindata.com
-    port: 5433
-    dbname: nifiregistryk8s
-  git:
-    address: gitlab.com/getindata/registry
-    repo: data-pipelines-nifi-registry
-    username: nifi.registry
-    password: password
+  registry: ""
+  repository: ""
+  tag: ""
+  username: ""
+  password: ""
+  pullPolicy: IfNotPresent
+  pullSecret:  ""
 
 auth:
   ldap:
-    enabled: false
-    managerDn: cn=ad,ou=users,dc=getindata,dc=com
-    host: ldaps://getindata.com:636
-    password: ldappasswordtoreplace
-    searchBaseUsers: dc=getindata,dc=com,dc=pl
-    searchBaseGroup: dc=getindata,dc=com,dc=pl
-    searchFilterUsers: (sAMAccountName={0})
-    searchFilterGroups: objectclass=group
-  ranger:
-    enabled: false
-    host: master-01.getindata.com
-    port: 6080
-    hdfs: getindata
+    enabled: true
+    host: ""
+    searchBase: ""
+    searchFilter: ""
+    groupSearchBase: ""
+    groupObjectClass: ""
+    groupSearchFilter: ""
+    groupMemberAttribute: ""
+    groupNameAttribute: ""
+    admin: ""
 
-nifi_access_internal: true
 
-serviceType: LoadBalancer
+securityContext:
+  runAsUser: 1000
+  fsGroup: 1000
 
-## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
-nodeSelector:
-  node: nifi
+sts:
+  podManagementPolicy: Parallel
+  AntiAffinity: soft
+  hostPort: null
 
-flow_persistence:
-  mode: "git"
-  git:
-    remote: origin
+properties:
+  externalSecure: false
+  isNode: true
+  enableSsl: true
+  cachePort: 4557
+  jobPort: 8008
+  httpPort: 8080
+  httpsPort: 8443
+  clusterPort: 6007
+  clusterSecure: true
+  needClientAuth: false
+  provenanceStorage: "8 GB"
+  siteToSite:
+    secure: true
+    port: 10443
+  authorizer: managed-authorizer
 
+## Expose the nifi service to be accessed from outside the cluster (LoadBalancer service).
+## or access it from within the cluster (ClusterIP service). Set the service type and the port to serve it.
+## ref: http://kubernetes.io/docs/user-guide/services/
+##
+service:
+  headless:
+    type: ClusterIP
+    port: 80
+  clusterip:
+    type: ClusterIP
+    port: 8443
 ## Configure Ingress based on the documentation here: https://kubernetes.io/docs/concepts/services-networking/ingress/
-## It requires support of SSL Passthrough from the Ingress side
+##
+
+#config the ingress info
 ingress:
-  enabled: true
-  annotations:
-    kubernetes.io/ingress.class: "nginx"
-    ingress.kubernetes.io/ssl-redirect: "true"
-    virtual-server.f5.com/ip: "127.0.0.1"
-  tls:
-    secret: nifireg-getindata-tls-secret
-  hosts: nifireg.getindata.com
+  enabled: false
+  annotations: {}
+  tls: []
+  hosts: []
   path: /
 
-extraVolumes:
-  - name: nifi-registry-authorizers
-    configMap:
-      name: nifi-registry-authorizers
-  - name: nifi-registry-bootstrap
-    configMap:
-      name: nifi-registry-bootstrap
-  - name: nifi-registry-identity
-    configMap:
-      name: nifi-registry-identity
-  - name: krb5-conf
-    configMap:
-      name: nifi-registry-krb5
-  - name: nifi-registry-logback
-    configMap:
-      name: nifi-registry-logback
-  - name: nifi-registry-properties
-    configMap:
-      name: nifi-registry-properties
-  - name: nifi-registry-providers
-    configMap:
-      name: nifi-registry-providers
-  - name: ranger-audit
-    configMap:
-      name: nifi-registry-ranger-audit
-  - name: ranger-security
-    configMap:
-      name: nifi-registry-ranger-security
-  - name: keystore
-    secret:
-      secretName: nifi-registry-certs
-      items:
-        - key: keystore.jks
-          path: keystore.jks
-  - name: truststore
-    secret:
-      secretName: nifi-registry-certs
-      items:
-        - key: truststore.jks
-          path: truststore.jks
+# The cert and key file to create tls secret used by ingress
+tlsSecrets:
+  crt: | your cert file content
+  key: | your key file content
 
-extraVolumeMounts:
-  - name: nifi-registry-configs
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/authorizers.xml
-    subPath: nifi-registry.properties
-  - name: nifi-registry-bootstrap
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/bootstrap.conf
-    subPath: bootstrap.conf
-  - name: nifi-registry-identity
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/identity-providers.xml
-    subPath: identity-providers.xml
-  - name: krb5-conf
-    mountPath: /etc/krb5.conf
-    subPath: /etc/krb5.conf
-  - name: nifi-registry-logback
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/logback.xml
-    subPath: logback.xml
-  - name: nifi-registry-properties
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/nifi-registry.properties
-    subPath: nifi-registry.properties
-  - name: nifi-registry-providers
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/providers.xml
-    subPath: providers.xml
-  - name: nfs-git-storage
-    mountPath: /opt/nifi-registry/nifi-registry-current/git_storage
-  - name: truststore
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/truststore.jks
-    subPath: truststore.jks
-  - name: keystore
-    mountPath: /opt/nifi-registry/nifi-registry-current/conf/keystore.jks
-    subPath: keystore.jks
+# Amount of memory to give the NiFi java heap
+jvmMemory: 4g
+
+# Separate image for tailing each log separately
+sidecar:
+  image: dllhb/debug-tool:v0.2
+
+## Enable persistence using Persistent Volume Claims
+## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
+##
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:  [ReadWriteMany]
+  dataStorage:
+    size: ""
+  logStorage:
+    size: ""
+
+resources:
+  limits:
+   cpu: 5000m
+   memory: 10240Mi
+  requests:
+   cpu: 3000m
+   memory: 8192Mi
+
+logresources:
+  requests:
+    cpu: 10m
+    memory: 10Mi
+  limits:
+    cpu: 50m
+    memory: 50Mi
+
+zookeeper:
+  ## If true, install the Zookeeper chart
+  ## ref: https://github.com/kubernetes/charts/tree/master/incubator/zookeeper
+  enabled: true
+
+  ## If the Zookeeper Chart is disabled a URL and port are required to connect
+  url: ""
+  port: 2181
