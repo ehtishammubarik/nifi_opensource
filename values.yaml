@@ -1,70 +1,18 @@
 ---
 
-# Number of nifi nodes
+# Number of nifi registry nodes
 replicaCount: 1
 
 image:
-  repository: "apache/nifi"
-  tag: "1.13.2"
+  repository: apache/nifi-registry
+  tag: "0.8.0"
   pullPolicy: Always
-  pullSecret: {}
+  pullSecret: regcred
 
 securityContext:
   fsGroup: 1000
   runAsUser: 1000
   runAsGroup: 1000
-
-sts:
-  # Parallel podManagementPolicy for faster bootstrap and teardown. Default is OrderedReady.
-  podManagementPolicy: Parallel
-  AntiAffinity: soft
-  hostPort: null
-  pod:
-    annotations:
-      security.alpha.kubernetes.io/sysctls: net.ipv4.ip_local_port_range=10000 65000
-
-properties:
-  # use externalSecure for when inbound SSL is provided by nginx-ingress or other external mechanism
-  externalSecure: false
-  isNode: true
-  httpPort: 8080
-  httpsPort: 8443
-  metricsPort: 9092
-  nodePort: 31889
-  clusterPort: 6007
-  clusterSecure: true
-  needClientAuth: false
-  provenanceStorage: "8 GB"
-  siteToSite:
-    secure: false
-    port: 10000
-  authorizer: file-provider
-  # use properties.safetyValve to pass explicit 'key: value' pairs that overwrite other configuration
-  safetyValve:
-    #nifi.variable.registry.properties: "${NIFI_HOME}/example1.properties, ${NIFI_HOME}/example2.properties"
-    nifi.web.http.network.interface.default: eth0
-    # listen to loopback interface so "kubectl port-forward ..." works
-    nifi.web.http.network.interface.lo: lo
-
-# Nifi User Authentication
-auth:
-  ldap:
-    enabled: false
-    managerDn: ""
-    host: ""
-    password: ""
-    # initialAdminIdentity:
-    strategy: "LDAPS"
-    searchBaseUsers: dc=getindata,dc=com,dc=pl
-    searchBaseGroup: dc=getindata,dc=com,dc=pl
-    searchFilterUsers: (sAMAccountName={0})
-    searchFilterGroups: objectclass=group
-  # Mandatory when using LDAP authentication and NiFi Registry with SSL
-  tls:
-    enabled: true
-    password: ""
-    certificateName: ""
-    token: ""
 
 # headless service
 headless:
@@ -74,18 +22,73 @@ headless:
   annotations:
     service.alpha.kubernetes.io/tolerate-unready-endpoints: "true"
 
-# ui service
-service:
-  type: NodePort
-  httpPort: 8080
-  httpsPort: 8443
-  annotations: {}
-  loadBalancerIP:
-    ## Load Balancer sources
-    ## https://kubernetes.io/docs/tasks/access-application-cluster/configure-cloud-provider-firewall/#restrict-access-for-loadbalancer-service
-    ##
-    loadBalancerSourceRanges:
-      - 10.10.10.0/24
+sts:
+  podManagementPolicy: Parallel
+
+resources:
+  requests:
+    cpu: 2000m
+    memory: 4096Mi
+  limits:
+    cpu: 2000m
+    memory: 4096Mi
+
+jvm:
+  xmx: "1024m"
+  xms: "1024m"
+
+kerberos:
+  enabled: true
+
+config:
+  security:
+    https:
+      enabled: true
+    certificateName: nifi-registry-ca-cs
+  ports:
+    http: 18080
+    https: 18443
+  db:
+    class: "org.postgresql.Driver"
+    username: nifiregistry
+    password: dbpasswordtoreplace
+    host: pgpool-getindata.com
+    port: 5433
+    dbname: nifiregistryk8s
+  git:
+    address: gitlab.com/getindata/registry
+    repo: data-pipelines-nifi-registry
+    username: nifi.registry
+    password: password
+
+auth:
+  ldap:
+    enabled: false
+    managerDn: cn=ad,ou=users,dc=getindata,dc=com
+    host: ldaps://getindata.com:636
+    password: ldappasswordtoreplace
+    searchBaseUsers: dc=getindata,dc=com,dc=pl
+    searchBaseGroup: dc=getindata,dc=com,dc=pl
+    searchFilterUsers: (sAMAccountName={0})
+    searchFilterGroups: objectclass=group
+  ranger:
+    enabled: false
+    host: master-01.getindata.com
+    port: 6080
+    hdfs: getindata
+
+nifi_access_internal: true
+
+serviceType: LoadBalancer
+
+## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
+nodeSelector:
+  node: nifi
+
+flow_persistence:
+  mode: "git"
+  git:
+    remote: origin
 
 ## Configure Ingress based on the documentation here: https://kubernetes.io/docs/concepts/services-networking/ingress/
 ## It requires support of SSL Passthrough from the Ingress side
@@ -96,122 +99,78 @@ ingress:
     ingress.kubernetes.io/ssl-redirect: "true"
     virtual-server.f5.com/ip: "127.0.0.1"
   tls:
-    secret: nifi-getindata-tls-secret
-  hosts: nifi.getindata.com
+    secret: nifireg-getindata-tls-secret
+  hosts: nifireg.getindata.com
   path: /
-  # If you want to change the default path, see this issue https://github.com/cetic/helm-nifi/issues/22
 
-# Amount of memory to give the NiFi java heap
-jvmMemory: 2g
+extraVolumes:
+  - name: nifi-registry-authorizers
+    configMap:
+      name: nifi-registry-authorizers
+  - name: nifi-registry-bootstrap
+    configMap:
+      name: nifi-registry-bootstrap
+  - name: nifi-registry-identity
+    configMap:
+      name: nifi-registry-identity
+  - name: krb5-conf
+    configMap:
+      name: nifi-registry-krb5
+  - name: nifi-registry-logback
+    configMap:
+      name: nifi-registry-logback
+  - name: nifi-registry-properties
+    configMap:
+      name: nifi-registry-properties
+  - name: nifi-registry-providers
+    configMap:
+      name: nifi-registry-providers
+  - name: ranger-audit
+    configMap:
+      name: nifi-registry-ranger-audit
+  - name: ranger-security
+    configMap:
+      name: nifi-registry-ranger-security
+  - name: keystore
+    secret:
+      secretName: nifi-registry-certs
+      items:
+        - key: keystore.jks
+          path: keystore.jks
+  - name: truststore
+    secret:
+      secretName: nifi-registry-certs
+      items:
+        - key: truststore.jks
+          path: truststore.jks
 
-# Separate image for tailing each log separately
-sidecar:
-  image: ez123/alpine-tini
-  tag: 3.7
-
-# Busybox image
-busybox:
-  image: busybox
-  tag: 1.33.1
-
-customEnv:
-  - name: TZ
-    value: Europe/Warsaw
-  - name: JAVA_HOME
-    value: /usr/local/openjdk-8
-## Example envs for HDFS
-#  - name: HADOOP_COMMON_LIB_NATIVE_DIR
-#    value: $HADOOP_HOME/lib/native
-#  - name: HADOOP_HOME
-#    value: /usr/hdp/3.1.0.0-78/hadoop-hdfs
-#  - name: HADOOP_INSTALL
-#    value: $HADOOP_HOME
-#  - name: HADOOP_HDFS_HOME
-#    value: $HADOOP_HOME/share/hadoop/common/
-#  - name: HADOOP_CLASSPATH
-#    value: /usr/hdp/3.1.0.0-78/hadoop-hdfs/lib
-#  - name: HADOOP_MAPRED_HOME
-#    value: /usr/hdp/3.1.0.0-78/hadoop-mapreduce
-#  - name: HADOOP_LIBEXEC_DIR
-#    value: /usr/hdp/3.1.0.0-78/hadoop-hdfs/libexec
-#  - name: HADOOP_COMMON_LIB_NATIVE_DIR
-#    value: ${HADOOP_PREFIX}/lib/native
-
-## Enable persistence using Persistent Volume Claims
-## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
-##
-persistence:
-  enabled: false
-
-  # When creating persistent storage, the NiFi helm chart can either reference an already-defined
-  # storage class by name, such as "standard" or can define a custom storage class by specifying
-  # customStorageClass: true and providing the "storageClass", "storageProvisioner" and "storageType".
-  # For example, to use SSD storage on Google Compute Engine see values-gcp.yaml
-  #
-  # To use a storage class that already exists on the Kubernetes cluster, we can simply reference it by name.
-  # For example:
-  storageClass: standard
-  #
-  # The default storage class is used if this variable is not set.
-
-  accessModes:  [ReadWriteMany]
-  ## Storage Capacities for persistent volumes
-  # Storage capacity for the 'data' directory, which is used to hold things such as the flow.xml.gz, configuration, state, etc.
-  dataStorage:
-    size: 15Gi
-  # Storage capacity for the FlowFile repository
-  flowfileRepoStorage:
-    size: 20Gi
-  # Storage capacity for the Content repository
-  contentRepoStorage:
-    size: 20Gi
-  # Storage capacity for the Provenance repository. When changing this, one should also change the properties.provenanceStorage value above, also.
-  provenanceRepoStorage:
-    size: 20Gi
-  # Storage capacity for nifi logs
-  logStorage:
-    size: 10Gi
-
-# Configure resource requests and limits
-## ref: http://kubernetes.io/docs/user-guide/compute-resources/
-##
-resources:
-  requests:
-    cpu: 2000m
-    memory: 4096Mi
-  limits:
-    cpu: 2000m
-    memory: 4096Mi
-
-logresources:
-  requests:
-    cpu: 10m
-    memory: 10Mi
-  limits:
-    cpu: 50m
-    memory: 50Mi
-
-## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/
-nodeSelector:
-  node: nifi
-
-tolerations: []
-
-initContainers: {}
-
-extraVolumeMounts: {}
-
-extraVolumes: {}
-
-## Kerberos settings
-kerberos:
-  enabled: false
-  keytab: /etc/security/keytabs/nifi-cdc.service.keytab
-  principal: nifi-cdc@GETINDATA.COM
-
-## Ranger settings
-ranger:
-  enabled: true
-  admin: http://master-02t.getindata.com:6080
-  serviceName: Ranger_nifi-gid
-  hdfsAudit: hdfs://getindata/ranger/audit
+extraVolumeMounts:
+  - name: nifi-registry-configs
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/authorizers.xml
+    subPath: nifi-registry.properties
+  - name: nifi-registry-bootstrap
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/bootstrap.conf
+    subPath: bootstrap.conf
+  - name: nifi-registry-identity
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/identity-providers.xml
+    subPath: identity-providers.xml
+  - name: krb5-conf
+    mountPath: /etc/krb5.conf
+    subPath: /etc/krb5.conf
+  - name: nifi-registry-logback
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/logback.xml
+    subPath: logback.xml
+  - name: nifi-registry-properties
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/nifi-registry.properties
+    subPath: nifi-registry.properties
+  - name: nifi-registry-providers
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/providers.xml
+    subPath: providers.xml
+  - name: nfs-git-storage
+    mountPath: /opt/nifi-registry/nifi-registry-current/git_storage
+  - name: truststore
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/truststore.jks
+    subPath: truststore.jks
+  - name: keystore
+    mountPath: /opt/nifi-registry/nifi-registry-current/conf/keystore.jks
+    subPath: keystore.jks
