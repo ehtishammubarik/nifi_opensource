@@ -2,7 +2,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "helm-nifi-registry.name" -}}
+{{- define "apache-nifi.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -11,7 +11,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "helm-nifi-registry.fullname" -}}
+{{- define "apache-nifi.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else -}}
@@ -27,39 +27,19 @@ If release name contains chart name it will be used as a full name.
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "helm-nifi-registry.chart" -}}
+{{- define "apache-nifi.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
-Service Name
+Form the Nifi Registry URL and port. If nifi-registry is installed as part of this chart, use k8s service discovery,
+else use user-provided name and port
 */}}
-{{- define "helm-nifi-registry.serviceName" -}}
-{{- printf "%s-%s" (include "helm-nifi-registry.fullname" .) "-scv" | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
+{{- define "registry.url" }}
+{{- $port := .Values.registry.port | toString }}
+{{- if .Values.registry.enabled -}}
+{{- printf "http://%s-nifi-registry:%s" .Release.Name $port }}
+{{- else -}}
+{{- printf "http://%s:%s" .Values.registry.url $port }}
 {{- end -}}
-
-{{/*
-Common labels
-*/}}
-{{- define "helm-nifi-registry.labels" -}}
-app.kubernetes.io/name: {{ include "helm-nifi-registry.name" . }}
-helm.sh/chart: {{ include "helm-nifi-registry.chart" . | quote }}
-app.kubernetes.io/instance: {{ .Release.Name }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end -}}
-
-{{/*
-Persistent Volume Claim name
-*/}}
-{{- define "helm-nifi-registry.pvcName" -}}
-{{- if .Values.persistence.nifiSingleDisk.existingPV }}
-{{-   printf "%s-%s" (include "helm-nifi-registry.fullname" .) "-single--pvc" | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
-{{- else if .Values.persistence.nifiSingleDisk.dynamic }}
-{{-   printf "%s-%s" (include "helm-nifi-registry.fullname" .) "-single--dyn-pvc" | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
-{{- else }}
-{{-   printf "%s-%s" (include "helm-nifi-registry.fullname" .) "-single--unknown-pvc" | replace "+" "_" | trunc 63 | trimSuffix "-" -}}
-{{- end }}
 {{- end -}}
