@@ -2,17 +2,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: nifi-registry-krb5
+  name: {{ template "apache-nifi.fullname" . }}-krb5
   labels:
-    app: {{ template "nifireg.fullname" . }}
-    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app: {{ template "apache-nifi.name" . }}
+    chart: {{ template "apache-nifi.chart" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 data:
   krb5.conf: |+
-    includedir /etc/krb5.conf.d/
-    includedir /var/lib/sss/pubconf/krb5.include.d/
-
     [libdefaults]
       renew_lifetime = 7d
       forwardable = true
