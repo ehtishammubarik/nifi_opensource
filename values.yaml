@@ -73,9 +73,9 @@ ingress:
   path: /
 
 # The cert and key file to create tls secret used by ingress
-#tlsSecrets:
-# crt: | your cert file content
-# key: | your key file content
+tlsSecrets:
+ crt: dummy
+ key: dummmmyyy
 
 # Amount of memory to give the NiFi java heap
 jvmMemory: 4g
