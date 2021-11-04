@@ -73,9 +73,9 @@ ingress:
   path: /
 
 # The cert and key file to create tls secret used by ingress
-tlsSecrets:
-  crt: | your cert file content
-  key: | your key file content
+#tlsSecrets:
+# crt: | your cert file content
+# key: | your key file content
 
 # Amount of memory to give the NiFi java heap
 jvmMemory: 4g
@@ -88,7 +88,7 @@ sidecar:
 ## ref: http://kubernetes.io/docs/user-guide/persistent-volumes/
 ##
 persistence:
-  enabled: true
+  enabled: false
   storageClass: ""
   accessModes:  [ReadWriteMany]
   dataStorage:
@@ -115,7 +115,7 @@ logresources:
 zookeeper:
   ## If true, install the Zookeeper chart
   ## ref: https://github.com/kubernetes/charts/tree/master/incubator/zookeeper
-  enabled: true
+  enabled: false
 
   ## If the Zookeeper Chart is disabled a URL and port are required to connect
   url: ""
