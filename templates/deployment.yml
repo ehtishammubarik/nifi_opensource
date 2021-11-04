@@ -36,6 +36,7 @@ spec:
                 set -x
                 set -e
                 echo '...0'
+                apt-get update 
                 apt install git -y
                 cd {{ $nifi_root }}
                 ls -la .
