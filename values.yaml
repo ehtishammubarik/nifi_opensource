@@ -71,8 +71,8 @@ persistence:
   enabled: false
 
   nifiSingleDisk:
-    enabled: true
-    storageSize: 4Gi
+    enabled: false
+      #storageSize: 4Gi
 
     # # choose one and only one of the following: dynamic or existingPV (existingPV wins if both are defined)
 
