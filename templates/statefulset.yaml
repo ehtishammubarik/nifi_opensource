@@ -288,16 +288,6 @@ spec:
             port: {{ .Values.properties.httpPort }}
 {{- end }}
         volumeMounts:
-          - name: "data"
-            mountPath: /opt/nifi/data
-          - name: "flowfile-repository"
-            mountPath: /opt/nifi/flowfile_repository
-          - name: "content-repository"
-            mountPath: /opt/nifi/content_repository
-          - name: "provenance-repository"
-            mountPath: /opt/nifi/provenance_repository
-          - name: "nifi-extensions"
-            mountPath: /opt/nifi/nifi-current/extensions
           - name: {{ .Release.Name }}-keytab
             mountPath: /etc/security/keytabs/{{ .Release.Name }}.service.keytab
             subPath: {{ .Release.Name }}.service.keytab
@@ -331,16 +321,6 @@ spec:
           - name: "state-management-xml"
             mountPath: /opt/nifi/nifi-current/conf/state-management.xml
             subPath: "state-management.xml"
-          - name: "ranger-nifi-audit-xml"
-            mountPath: /opt/nifi/nifi-current/conf/ranger-nifi-audit.xml
-            subPath: "ranger-nifi-audit.xml"
-          - name: "ranger-nifi-security-xml"
-            mountPath: /opt/nifi/nifi-current/conf/ranger-nifi-security.xml
-            subPath: "ranger-nifi-security.xml"
-          {{- range $secret := .Values.secrets }}
-            {{- if $secret.mountPath }}
-              {{- if $secret.keys }}
-                {{- range $key := $secret.keys }}
           - name: {{ include "apache-nifi.fullname" $ }}-{{ $secret.name }}
             mountPath: {{ $secret.mountPath }}/{{ $key }}
             subPath: {{ $key }}
