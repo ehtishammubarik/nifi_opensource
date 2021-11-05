@@ -123,8 +123,8 @@ spec:
           NIFI_INITIAL_ADMIN_IDENTITY=albert.lewandowski
 
           # Move the truststore and keystore in the conf directory
-          mv ./keystore.jks conf/
-          mv ./truststore.jks conf/
+          mv ./keystore.jks conf/  || true
+          mv ./truststore.jks conf/  || true
 
           cp ${NIFI_LOGIN_ID} /opt/nifi/nifi-current/conf/new-login-identity-providers.xml
           sed -i -e 's|<property name="TLS - Keystore Password"></property>|<property name="TLS - Keystore Password">'"${NIFI_KEY_STORE_PASSWORD}"'</property>|'                       /opt/nifi/nifi-current/conf/new-login-identity-providers.xml
