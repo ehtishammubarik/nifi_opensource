@@ -68,7 +68,7 @@ auth:
 
 # headless service
 headless:
-  type: ClusterIP
+  #type: NodePort
   # It can be useful for setting up IP if we already have created Load Balancer
   # ip: 127.0.0.1
   annotations:
