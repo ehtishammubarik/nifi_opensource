@@ -321,6 +321,10 @@ spec:
           - name: "state-management-xml"
             mountPath: /opt/nifi/nifi-current/conf/state-management.xml
             subPath: "state-management.xml"
+          {{- range $secret := .Values.secrets }}
+            {{- if $secret.mountPath }}
+              {{- if $secret.keys }}
+                {{- range $key := $secret.keys }}
           - name: {{ include "apache-nifi.fullname" $ }}-{{ $secret.name }}
             mountPath: {{ $secret.mountPath }}/{{ $key }}
             subPath: {{ $key }}
