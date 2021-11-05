@@ -68,7 +68,7 @@ auth:
 
 # headless service
 headless:
-  #type: NodePort
+  type: LoadBalancer
   # It can be useful for setting up IP if we already have created Load Balancer
   # ip: 127.0.0.1
   annotations:
